@@ -329,7 +329,7 @@ server.listen(PORT, () => {
 // parallel:true only fans out when EVERY call is read-only, up to BATCH_MAX_PARALLEL at once.
 // Small tasks: call the single tool directly — batch adds nothing for 1 call.
 const BATCH_MAX_CALLS = 32;
-const BATCH_MAX_BYTES = 5 * 1024 * 1024; // 5MB total per batch
+const BATCH_MAX_BYTES = 5 * 1024 * 1024 - 65536; // 5MB per batch minus envelope headroom, so a max-size batch isn't replaced wholesale at the MCP cap
 const BATCH_MAX_PARALLEL = 6;
 const BATCH_READ_ONLY = new Set(["get_status", "ping_figma", "get_document_info", "get_selection", "get_node_tree", "get_node_by_id", "get_local_components", "get_local_styles", "get_local_variables", "export_node", "get_dev_resources", "inspect_css", "get_canvas_view", "get_reactions", "get_text_segments", "list_fonts"]);
 
@@ -419,28 +419,37 @@ function expandCall(name, args) {
   return { name: TOOL_ALIAS[name] || name, args: expandKeys(args) };
 }
 // heavy render keys nobody needs for layout/codegen decisions
-const SLIM_DROP = new Set(["fills", "strokes", "effects", "absoluteBoundingBox", "exportSettings"]);
+// (the struct detail tier already omits all of these; adding them here is a no-op for default reads)
+const SLIM_DROP = new Set(["fills", "strokes", "effects", "absoluteBoundingBox", "exportSettings",
+  "relativeTransform", "absoluteTransform", "styledTextSegments", "rangeFonts", "rangeFills",
+  "annotations", "guides", "exposedInstances"]);
 // trees slim by default (opt out with _full:true); selection stays full (codegen source)
 const SLIM_DEFAULT_READS = new Set(["get_node_tree", "get_node_by_id"]);
 // fields picker: catalog is cheap, instances are expensive.
 // Structural keys always survive (navigation/identity); everything else
 // must be asked for. Full data stays one flag away — nothing hidden by default.
 const FIELDS_ALWAYS = new Set(["id", "children", "childIds", "childCount"]);
+// wrapper/envelope keys (no node `type`) that carry the payload of list/aggregate reads;
+// kept so a fields picker narrows the nodes, not the container (get_selection {count,nodes}, etc).
+const FIELDS_ENVELOPE = new Set(["count", "nodes", "collections", "segments", "paints", "texts", "grids", "variables", "effects", "length", "truncated"]);
 const FIELDABLE_READS = new Set(["get_selection", "get_node_tree", "get_node_by_id",
   "get_local_components", "get_local_styles", "get_local_variables",
   "get_dev_resources", "inspect_css", "get_canvas_view", "get_reactions"]);
 function pickFields(v, fields) {
   const allow = new Set([...FIELDS_ALWAYS, ...fields]);
-  const walk = (x) => {
-    if (Array.isArray(x)) return x.map(walk);
+  const walk = (x, depth) => {
+    if (Array.isArray(x)) return x.map((y) => walk(y, depth));
     if (x && typeof x === "object") {
+      // envelope keys survive only at the TOP level: a nested typeless object
+      // (e.g. a style entry {id,name,paints}) must not re-leak its heavy payload.
+      const wrapper = depth === 0 && typeof x.type !== "string";
       const o = {};
-      for (const k of Object.keys(x)) { if (allow.has(k)) o[k] = walk(x[k]); }
+      for (const k of Object.keys(x)) { if (allow.has(k) || (wrapper && FIELDS_ENVELOPE.has(k))) o[k] = walk(x[k], depth + 1); }
       return o;
     }
     return x;
   };
-  return walk(v);
+  return walk(v, 0);
 }
 function applyReadOptions(out, params, readTool) {
   let r = out;
@@ -650,7 +659,7 @@ const TOOLS = [
   { name: "list_fonts", description: "List available fonts (up to 200).", inputSchema: { type: "object", properties: { channel: { type: "string" } } } },
   { name: "get_text_segments", description: "Get styled text segments of a text node (fonts/fills/decoration per range).", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, fields: { type: "array" }, start: { type: "number" }, end: { type: "number" } }, required: ["nodeId"] } },
   { name: "get_text_list", description: "Get list type of a text node (ORDERED|UNORDERED|NONE).", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" } }, required: ["nodeId"] } },
-  { name: "set_text_list", description: "Set list type on a text node (ORDERED|UNORDERED|NONE).", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, type: { type: "string", enum: ["ORDERED", "UNORDERED", "NONE"] } }, required: ["nodeId", "type"] } },
+  { name: "set_text_list", description: "Set list type on a text node.", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, type: { type: "string", enum: ["ORDERED", "UNORDERED", "NONE"] } }, required: ["nodeId", "type"] } },
   { name: "get_reactions", description: "Get prototype reactions on a node.", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" } }, required: ["nodeId"] } },
   { name: "apply_style", description: "Apply a local paint/text/effect style to a node.", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, styleId: { type: "string" }, kind: { type: "string", enum: ["PAINT", "TEXT", "EFFECT"] } }, required: ["nodeId", "styleId", "kind"] } },
   { name: "set_export_settings", description: "Set export settings on a node.", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, settings: { type: "array" } }, required: ["nodeId", "settings"] } },
@@ -663,7 +672,7 @@ const TOOLS = [
   { name: "create_section", description: "Create a section.", inputSchema: { type: "object", properties: { channel: { type: "string" }, name: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } } } },
   { name: "create_shape", description: "Create a shape (line/polygon/star).", inputSchema: { type: "object", properties: { channel: { type: "string" }, kind: { type: "string", enum: ["LINE", "POLYGON", "STAR"] }, parentId: { type: "string" }, x: { type: "number" }, y: { type: "number" }, pointCount: { type: "number" }, name: { type: "string" } }, required: ["kind"] } },
   { name: "create_slice", description: "Create a slice.", inputSchema: { type: "object", properties: { channel: { type: "string" }, parentId: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, name: { type: "string" } } } },
-  { name: "page_ops", description: "Page ops (rename/duplicate/background) on the current page.", inputSchema: { type: "object", properties: { channel: { type: "string" }, action: { type: "string", enum: ["rename", "duplicate", "background"] }, name: { type: "string" }, color: { type: "string" } }, required: ["action"] } },
+  { name: "page_ops", description: "Page ops on the current page.", inputSchema: { type: "object", properties: { channel: { type: "string" }, action: { type: "string", enum: ["rename", "duplicate", "background"] }, name: { type: "string" }, color: { type: "string" } }, required: ["action"] } },
   { name: "set_effects", description: "Set effects (shadows/blurs) on a node.", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, effects: { type: "array" } }, required: ["nodeId", "effects"] } },
   { name: "set_blend_mode", description: "Set blend mode on a node.", inputSchema: { type: "object", properties: { channel: { type: "string" }, nodeId: { type: "string" }, blendMode: { type: "string" } }, required: ["nodeId", "blendMode"] } },
   { name: "create_style", description: "Create a paint/text/effect style.", inputSchema: { type: "object", properties: { channel: { type: "string" }, name: { type: "string" }, type: { type: "string" } }, required: ["name", "type"] } },
@@ -865,9 +874,14 @@ async function handleMcp(req) {
     const toolName = params?.name;
     try {
       const result = await callTool(toolName, params?.arguments || {});
-      const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      const text = typeof result === "string" ? result : JSON.stringify(result);
       const cap = toolName === "batch_tools" ? 5 * 1024 * 1024 : 200000;
-      return reply(id, { content: [{ type: "text", text: text.slice(0, cap) }], isError: false });
+      if (text.length > cap) {
+        // never cut JSON mid-object: return a valid envelope the caller can parse
+        process.stderr.write(`tools/call ${toolName}: response ${text.length} chars exceeds cap ${cap}; returning truncation envelope\n`);
+        return reply(id, { content: [{ type: "text", text: JSON.stringify({ ok: false, truncated: true, chars: text.length, limit: cap, hint: "response too large - narrow the query (fields/_slim/_detail) or lower depth" }) }], isError: false });
+      }
+      return reply(id, { content: [{ type: "text", text }], isError: false });
     } catch (e) {
       return reply(id, { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true });
     }
