@@ -1882,8 +1882,10 @@ async function cmdSetFills(params) {
     const n = await findNode(params.nodeId);
     if (!n || !("fills" in n))
         throw new Error("node has no fills");
-    const fills = (params.fills || []).map(toPaint);
-    n.fills = fills.length ? fills : [toPaint(params?.fill ?? params?.color ?? "#D9D9D9")];
+    // An explicit fills:[] CLEARS fills; omitting `fills` keeps the fill/color/#D9D9D9 shortcut.
+    const hasFills = Array.isArray(params?.fills);
+    const fills = (hasFills ? params.fills : []).map(toPaint);
+    n.fills = hasFills ? fills : [toPaint(params?.fill ?? params?.color ?? "#D9D9D9")];
     return serializeNode(n, 0, detailOf(params));
 }
 async function cmdSetStrokes(params) {
@@ -2843,11 +2845,14 @@ async function cmdSetSelection(params) {
             nodes.push(n);
     }
     figma.currentPage.selection = nodes;
-    try {
-        if (nodes.length)
-            figma.viewport.scrollAndZoomIntoView(nodes);
+    // Never move the user's camera unless explicitly asked — keeps their view stable while they work in parallel.
+    if (params?.scrollIntoView === true) {
+        try {
+            if (nodes.length)
+                figma.viewport.scrollAndZoomIntoView(nodes);
+        }
+        catch (_e) { }
     }
-    catch (_e) { }
     return { count: nodes.length };
 }
 async function cmdScrollToNode(params) {
@@ -2883,11 +2888,13 @@ async function cmdAddToSelection(params) {
         merged.set(n.id, n);
     const next = Array.from(merged.values());
     figma.currentPage.selection = next;
-    try {
-        if (next.length)
-            figma.viewport.scrollAndZoomIntoView(next);
+    if (params?.scrollIntoView === true) {
+        try {
+            if (next.length)
+                figma.viewport.scrollAndZoomIntoView(next);
+        }
+        catch (_e) { }
     }
-    catch (_e) { }
     return { count: next.length };
 }
 async function cmdClearSelection(_params) {

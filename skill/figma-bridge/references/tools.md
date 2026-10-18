@@ -76,7 +76,7 @@ Serialized nodes include: `id, name, type, x, y, width, height, rotation, opacit
 - `edit_text_chars { nodeId, mode: insert|delete, start, text?, end? }` — edits characters only, insert needs text and delete needs end
 - `list_fonts {}` → `{ fonts: [{ family, style }] }` — read-only, at most 200 entries plus `truncated:true` when more exist
 - `get_font_axes { family }` → `{ family, axes: string[]|null }` — null when the family is static
-- `set_fills { nodeId, fills?[{color,opacity}], fill?, color? }` — fills[] also accepts `{type:"IMAGE",imageHash,scaleMode:FILL|FIT|CROP|TILE}`
+- `set_fills { nodeId, fills?[{color,opacity}], fill?, color? }` — fills[] also accepts `{type:"IMAGE",imageHash,scaleMode:FILL|FIT|CROP|TILE}`. An explicit `fills:[]` REMOVES all fills; omitting `fills` keeps the `fill`/`color`/`#D9D9D9` shortcut
 - `set_strokes { nodeId, strokes?, strokeWeight?, strokeAlign?: CENTER|INSIDE|OUTSIDE, strokeTopWeight?, strokeRightWeight?, strokeBottomWeight?, strokeLeftWeight? }`
 - `set_node_props { nodeId, props: { x,y,width,height,name,opacity,visible,locked,cornerRadius,fill,rotation } }` (also accepts flat props) — returns `{ applied, mismatched? }`; resizing needs BOTH `width` and `height`
 - `set_layout { nodeId, layoutMode?: NONE|HORIZONTAL|VERTICAL|GRID, itemSpacing?, counterAxisSpacing?: number|null, padding?, paddingTop/Bottom/Left/Right?, primaryAxisAlignItems?, counterAxisAlignItems?, primaryAxisSizingMode?: FIXED|AUTO, counterAxisSizingMode?: FIXED|AUTO, preserveChildLayout? }` — returns `{ applied, mismatched?, restoredChildren? }`; `preserveChildLayout` (default true) snapshots children's `layoutGrow`/`layoutAlign`/`layoutPositioning` before a `layoutMode` change and restores them after (Figma normalizes them on that assignment)
@@ -84,7 +84,7 @@ Serialized nodes include: `id, name, type, x, y, width, height, rotation, opacit
 - `clone_node { nodeId, parentId?, x?, y? }`
 - `move_node { nodeId, parentId, index? }`
 - `rescale_node { nodeId, scale }` — scale must be >0, returns `{ id, scale }`
-- `set_selection { nodeIds[] }` — selects + zooms
+- `set_selection { nodeIds[], scrollIntoView? }` — selects; camera stays put unless `scrollIntoView:true`
 - `create_page { name?, select? }`
 - `page_ops { action: rename|duplicate|background, name?, color? }` — acts on the current page; `background` needs `color`
 - `create_section { name?, x?, y?, width?, height? }`
@@ -105,8 +105,10 @@ Serialized nodes include: `id, name, type, x, y, width, height, rotation, opacit
 
 ## Selection/view
 
+The user's camera is never moved unless a tool says so: `set_selection`/`add_to_selection` only pan/zoom when called with `scrollIntoView:true`, and `scroll_to_node`/`set_viewport` pan by definition. Do NOT auto-scroll after edits — it yanks the user's view while they work in parallel.
+
 - `scroll_to_node { nodeId? | nodeIds[]? }` — scrolls viewport to node(s); selection unchanged
-- `add_to_selection { nodeIds[] | nodeId }` — adds to current selection; drops PAGE/DOCUMENT ids
+- `add_to_selection { nodeIds[] | nodeId, scrollIntoView? }` — adds to current selection; drops PAGE/DOCUMENT ids; camera stays put unless `scrollIntoView:true`
 - `clear_selection {}` — clears current selection
 - `get_canvas_view {}` → `{ center, zoom, bounds }` — read-only viewport, no node data
 - `set_viewport { zoom?, centerX?, centerY? }` → returns the updated canvas view

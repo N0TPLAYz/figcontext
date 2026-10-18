@@ -22,7 +22,19 @@
   .status { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 12px; flex-wrap: wrap; }
   .dot { width: 0.65em; height: 0.65em; border-radius: 50%; background: #c00; flex: none; }
   .dot.on { background: #0a0; }
-  #log { width: 100%; height: 180px; overflow: auto; background: #0f0f0f; color: #c8f5c8; font-family: monospace; font-size: 11px; padding: 8px; border-radius: 8px; white-space: pre-wrap; }
+  .activity { width: 100%; min-height: 188px; margin: 10px 0 0; padding: 14px; border: 1px solid #e6e6e6; border-radius: 14px; background: #fafafa; display: flex; flex-direction: column; gap: 8px; }
+  .act-head { display: flex; align-items: center; gap: 8px; }
+  .act-dot { width: 9px; height: 9px; border-radius: 50%; background: #cfcfcf; flex: none; }
+  .act-dot.work { background: #d98200; animation: pulse 1.1s ease-in-out infinite; }
+  .act-dot.ok { background: #16a34a; }
+  .act-dot.err { background: #dc2626; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .act-state { font-weight: 600; font-size: 13px; }
+  .act-count { margin-left: auto; font-size: 11px; color: #9a9a9a; }
+  .act-line { font-size: 12px; line-height: 1.45; color: #555; overflow-wrap: anywhere; flex: 1 1 auto; }
+  .act-toggle { align-self: flex-start; margin-top: auto; padding: 4px 12px; border: 1px solid #e6e6e6; border-radius: 10px; background: #fff; font-size: 11px; color: #666; cursor: pointer; }
+  .act-toggle:hover { background: #f0f0f0; }
+  #log { max-height: 132px; overflow: auto; background: #111; color: #b9e6b9; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; padding: 8px; border-radius: 8px; white-space: pre-wrap; }
   .hint { background: #f5f5f5; border-radius: 8px; padding: 8px; font-size: 12px; margin-top: 10px; width: 100%; overflow-wrap: anywhere; }
   code { background: #eee; padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
   details { margin: 8px 0; font-size: 12px; width: 100%; }
@@ -50,7 +62,16 @@
   <button id="pingBtn">Ping canvas</button>
 </div>
 <div class="status"><div id="dot" class="dot"></div><span id="statusText">disconnected</span></div>
-<div id="log"></div>
+<div class="activity">
+  <div class="act-head">
+    <span id="actDot" class="act-dot"></span>
+    <span id="actState" class="act-state">Idle</span>
+    <span id="actCount" class="act-count"></span>
+  </div>
+  <div id="actLine" class="act-line">Waiting for the bridge…</div>
+  <button id="logToggle" class="act-toggle" type="button" aria-expanded="false">Details</button>
+  <pre id="log" hidden></pre>
+</div>
 <div class="hint">
   Give this link to ANY AI + tell it what to change:<br/>
   <code id="hintLink">http://localhost:3055/file</code><br/>
@@ -80,6 +101,7 @@ function stopHeartbeat() {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
 }
 
+// raw protocol lines go to the hidden details pane; the visible surface is the activity card
 function log(msg) {
   var el = document.getElementById('log');
   var t = new Date().toLocaleTimeString();
@@ -91,6 +113,54 @@ function setStatus(on, text) {
   document.getElementById('statusText').textContent = text;
   document.getElementById('connBtn').textContent = on ? 'Disconnect' : 'Connect';
 }
+
+// ---- activity card: plain language, no command-name noise ----
+var ACT_OPS = 0;
+var inflightCmd = {};
+var FRIENDLY = [
+  [/^get /, 'Reading'], [/^find /, 'Searching'], [/^list /, 'Listing'],
+  [/^create /, 'Creating'], [/^clone /, 'Duplicating'], [/^move /, 'Moving'],
+  [/^set /, 'Editing'], [/^apply /, 'Applying'], [/^update /, 'Updating'], [/^rename /, 'Renaming'],
+  [/^delete /, 'Deleting'], [/^remove /, 'Removing'], [/^export /, 'Exporting'],
+  [/^group /, 'Grouping'], [/^ungroup/, 'Ungrouping'], [/^flatten/, 'Flattening'],
+  [/^ping /, 'Checking'], [/^undo/, 'Undoing']
+];
+function friendly(cmd) {
+  var c = String(cmd || '').replace(/_/g, ' ').trim();
+  if (!c) return '';
+  for (var i = 0; i < FRIENDLY.length; i++) {
+    var t = c + ' ';
+    if (FRIENDLY[i][0].test(t)) {
+      var rest = t.replace(FRIENDLY[i][0], '').trim();
+      return rest ? FRIENDLY[i][1] + ' ' + rest : FRIENDLY[i][1];
+    }
+  }
+  return c.charAt(0).toUpperCase() + c.slice(1);
+}
+function refreshCount() {
+  var c = document.getElementById('actCount');
+  if (c) c.textContent = ACT_OPS ? ACT_OPS + (ACT_OPS === 1 ? ' action' : ' actions') : '';
+}
+function setActivity(kind, state, line) {
+  var d = document.getElementById('actDot');
+  if (d) d.className = 'act-dot' + (kind ? ' ' + kind : '');
+  if (state) document.getElementById('actState').textContent = state;
+  if (line !== undefined) document.getElementById('actLine').textContent = line;
+  refreshCount();
+}
+(function () {
+  var t = document.getElementById('logToggle');
+  if (!t) return;
+  t.onclick = function () {
+    var pre = document.getElementById('log');
+    var show = pre.hidden;
+    pre.hidden = !show;
+    t.textContent = show ? 'Hide details' : 'Details';
+    t.setAttribute('aria-expanded', String(show));
+    if (show) pre.scrollTop = pre.scrollHeight;
+  };
+})();
+
 var ICON_MIN = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 8.5L7 4L11.5 8.5" stroke="#111" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 var ICON_MAX = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 5.5L7 10L11.5 5.5" stroke="#111" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 function setMin(min) {
@@ -124,6 +194,7 @@ function fallbackCopy(text) {
     ta.focus(); ta.select();
     var ok = document.execCommand('copy');
     document.body.removeChild(ta);
+    setActivity(ok ? 'ok' : 'err', ok ? 'Ready' : 'Error', ok ? 'Link copied to clipboard.' : 'Copy failed — select the link manually.');
     log(ok ? 'copied ' + text : 'copy failed, select manually');
   } catch (e) { log('copy failed, select manually'); }
 }
@@ -135,7 +206,7 @@ document.getElementById('copyLinkBtn').onclick = function() {
   var v = input.value;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(v).then(function() { log('link copied'); }, function() { fallbackCopy(v); });
+      navigator.clipboard.writeText(v).then(function() { setActivity('ok', 'Ready', 'Link copied to clipboard.'); log('link copied'); }, function() { fallbackCopy(v); });
     } else {
       fallbackCopy(v);
     }
@@ -150,16 +221,18 @@ function register() {
 
 function connect() {
   var url = document.getElementById('server').value.trim();
-  if (!/^wss?:\/\//.test(url)) { log('invalid server URL (expected ws:// or wss://): ' + url); setStatus(false, 'disconnected'); return; }
+  if (!/^wss?:\/\//.test(url)) { log('invalid server URL (expected ws:// or wss://): ' + url); setStatus(false, 'disconnected'); setActivity('err', 'Error', 'Server URL must start with ws:// or wss://'); return; }
   lsSet('oc_server', url);
   wantConnected = true;
   try { if (ws) ws.close(); } catch (e) {}
   log('connecting to ' + url + ' ...');
   setStatus(false, 'connecting...');
-  try { ws = new WebSocket(url); } catch (e) { setStatus(false, 'disconnected'); log('WebSocket failed: ' + ((e && e.message) || e) + ' — check server URL, is bridge running?'); return; }
+  setActivity('work', 'Connecting', 'Talking to the bridge…');
+  try { ws = new WebSocket(url); } catch (e) { setStatus(false, 'disconnected'); setActivity('err', 'Error', 'Cannot open a connection — check the server URL.'); log('WebSocket failed: ' + ((e && e.message) || e) + ' — check server URL, is bridge running?'); return; }
   ws.onopen = function() {
     failCount = 0;
     setStatus(true, 'connected');
+    setActivity('ok', 'Ready', 'Connected — your file is live.');
     log('ws open');
     register();
     startHeartbeat();
@@ -171,6 +244,8 @@ function connect() {
     if (msg.type === 'ping' || msg.type === 'welcome') { log('bridge: ' + (msg.type)); return; }
     // bridge -> figma command: { id, command, params }
     if (msg.command) {
+      inflightCmd[msg.id] = msg.command;
+      setActivity('work', 'Working', friendly(msg.command) + '…');
       log('← ' + msg.command + ' #' + msg.id);
       parent.postMessage({ pluginMessage: { id: msg.id, command: msg.command, params: msg.params || {} } }, '*');
     } else {
@@ -179,6 +254,9 @@ function connect() {
   };
   ws.onclose = function(ev) {
     setStatus(false, 'disconnected');
+    inflightCmd = {};
+    setActivity('', wantConnected ? 'Reconnecting' : 'Disconnected',
+      wantConnected ? 'Bridge closed — reconnecting…' : 'Disconnected. Press Connect to resume.');
     stopHeartbeat();
     log('ws closed code=' + (ev && ev.code) + ' reason=' + ((ev && ev.reason) || 'none') + ' — bridge running? test ' + url.replace(/^ws:\/\//, 'http://').replace(/\/$/, '') + '/health');
     if (wantConnected) {
@@ -190,7 +268,7 @@ function connect() {
       reconnectTimer = setTimeout(function() { if (wantConnected) connect(); }, delay);
     }
   };
-  ws.onerror = function(ev) { log('ws error to ' + url + ' (start bridge: node server.js in oc mcp/bridge, keep it open)'); };
+  ws.onerror = function(ev) { setActivity('err', 'Error', 'Cannot reach the bridge at ' + url + '.'); log('ws error to ' + url + ' (start bridge: node server.js in oc mcp/bridge, keep it open)'); };
 }
 
 document.getElementById('connBtn').onclick = function() {
@@ -216,6 +294,10 @@ window.onmessage = function(event) {
   // local UI test response
   if (msg.id && String(msg.id).indexOf('local-') === 0) {
     if (msg.id === 'local-resize') return;
+    if (msg.id === 'local-ping') {
+      if (msg.ok) setActivity('ok', 'Ready', 'Canvas reachable — ' + String((msg.result && msg.result.file) || 'ok'));
+      else setActivity('err', 'Error', 'Canvas error: ' + (msg.error || 'unknown'));
+    }
     log(msg.ok ? 'canvas: ' + JSON.stringify(msg.result).slice(0, 300) : 'canvas error: ' + msg.error);
     return;
   }
@@ -226,6 +308,16 @@ window.onmessage = function(event) {
   }
   // command response -> forward to bridge over ws
   if (msg.id !== undefined) {
+    var done = inflightCmd[msg.id]; delete inflightCmd[msg.id];
+    ACT_OPS++;
+    var live = !!(ws && ws.readyState === 1);
+    if (msg.ok) {
+      // only claim "Ready" while the bridge is actually up — a late reply can land after a drop
+      if (live) setActivity('ok', 'Ready', 'Done — ' + (friendly(done) || 'action')); else refreshCount();
+    } else {
+      var errText = String(msg.error || 'unknown error').replace(/\s+/g, ' ').slice(0, 140);
+      setActivity('err', 'Error', 'Failed — ' + (friendly(done) || 'action') + ': ' + errText);
+    }
     log((msg.ok ? '→ ok #' : '→ err #') + msg.id);
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ id: msg.id, ok: msg.ok, result: msg.result, error: msg.error }));
