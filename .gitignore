@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output (tsc). code.js is intentionally TRACKED so a clone loads in
+# Figma immediately; delete this line if you'd rather build it with the bat.
+out/
+dist/
+*.tsbuildinfo
+
+# Runtime / machine state
+.bridge-port
+
+# Machine-specific config (holds an absolute path; the bat / setup-opencode.js
+# regenerate it). The tracked reference is opencode.example.json.
+opencode.json
+
+# Logs
+*.log
+*.log.*
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Known junk: a bat can expand %USERPROFILE% unexpanded and create this folder
+%USERPROFILE%/

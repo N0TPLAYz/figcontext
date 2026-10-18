@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "figma-bridge": {
+      "type": "local",
+      "command": ["node", "/ABSOLUTE/PATH/TO/oc mcp/bridge/server.js"],
+      "enabled": true
+    }
+  }
+}

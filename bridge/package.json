@@ -1,0 +1,13 @@
+{
+  "name": "oc-mcp-bridge",
+  "version": "1.0.0",
+  "description": "Local WebSocket + MCP stdio bridge between Figma plugin and opencode / any MCP CLI",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

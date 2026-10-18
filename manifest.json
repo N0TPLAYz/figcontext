@@ -1,0 +1,25 @@
+{
+  "name": "oc mcp",
+  "id": "1680485268450463756",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": [
+    "figma",
+    "figjam"
+  ],
+  "ui": "ui.html",
+  "permissions": [],
+  "networkAccess": {
+    "allowedDomains": [
+      "ws://localhost:3055"
+    ],
+    "reasoning": "Connects to a local bridge server that relays commands from an AI coding agent (opencode) running on the same machine.",
+    "devAllowedDomains": [
+      "http://localhost:3055",
+      "ws://localhost:3055"
+    ]
+  }
+}
